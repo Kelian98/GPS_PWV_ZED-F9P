@@ -1,8 +1,11 @@
 import os
 import struct
+import glob
 
 def concatenate_bin_files(folder_path, output_file):
-    file_list = [f for f in os.listdir(folder_path) if f.endswith('.bin')]
+    file_list = glob.glob(os.path.join(folder_path, '2024*.bin'))
+    # Important to sort in order to generate the RINEX file later
+    file_list = sorted(file_list) 
     
     with open(output_file, 'wb') as outfile:
         for file_name in file_list:

@@ -266,3 +266,18 @@ CFG-MSGOUT-UBX_RXM_SFRBX_USB
 ​    "CFG_MSGOUT_UBX_RXM_SFRBX_USB": (0x20910234, U1),
 
 ![image-20240124000438913](/home/sommer/.config/Typora/typora-user-images/image-20240124000438913.png)
+
+
+layers = 1
+transaction = 0
+cfg_data = []
+for port_type in ("USB", "UART1"):
+    cfg_data.append((f"CFG_{port_type}OUTPROT_NMEA", not enable))
+    cfg_data.append((f"CFG_{port_type}OUTPROT_UBX", enable))
+    cfg_data.append((f"CFG_MSGOUT_UBX_NAV_PVT_{port_type}", enable))
+    cfg_data.append((f"CFG_MSGOUT_UBX_NAV_SAT_{port_type}", enable * 4))
+    cfg_data.append((f"CFG_MSGOUT_UBX_NAV_DOP_{port_type}", enable * 4))
+    cfg_data.append((f"CFG_MSGOUT_UBX_RXM_RTCM_{port_type}", enable))
+
+msg = UBXMessage.config_set(layers, transaction, cfg_data)
+self.sendqueue.put((msg.serialize(), msg))

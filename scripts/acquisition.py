@@ -23,11 +23,8 @@ this context as serial streams cannot be shared between
 processes. A discrete hardware I/O process must be implemented
 e.g. using RPC server techniques.
 
-Created on 07 Aug 2021
+Write each day data in a separate file and update automatically.
 
-:author: semuadmin
-:copyright: SEMU Consulting © 2021
-:license: BSD 3-Clause
 """
 # pylint: disable=invalid-name
 
@@ -37,8 +34,9 @@ from threading import Event, Lock, Thread
 from time import sleep
 from serial import Serial
 from pyubx2 import POLL, UBX_PROTOCOL, UBXMessage, UBXReader, UBX_PAYLOADS_POLL
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from utilities import *
+import time
 
 def io_data(
     stream: object,
@@ -90,6 +88,10 @@ def process_data(queue: Queue, stop: Event, filename: str):
                 queue.task_done()
 
 
+def generate_filename():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d") + ".ubx"
+
+
 if __name__ == "__main__":
     # set port, baudrate and timeout to suit your device configuration
     if platform == "win32":  # Windows
@@ -106,12 +108,13 @@ if __name__ == "__main__":
     transaction = 0
     enable = 1
     port_type = "USB"
-    sample_rate = 250 #e.g. scale ms (0.001s) 100 = 10Hz, 1000 = 1 Hz
-    nav_rate = 4 #e.g. 5 means five measurements for every navigation solution. The minimum value is 1. The maximum value is 127.
+    sample_rate = 1000 #e.g. scale ms (0.001s) 100 = 10Hz, 1000 = 1 Hz
+    nav_rate = 5 #e.g. 5 means five measurements for every navigation solution. The minimum value is 1. The maximum value is 127.
     DELAY = 1
 
     # Filename to write the UBX raw data
-    filename = datetime.utcnow().isoformat() + ".ubx"
+    # filename = datetime.utcnow().isoformat() + ".ubx"
+    filename = generate_filename()
 
     with Serial(port, baudrate, timeout=timeout) as serial_stream:
 
@@ -161,6 +164,48 @@ if __name__ == "__main__":
         # loop until user presses Ctrl-C
         while not stop_event.is_set():
             try:
+                current_filename = generate_filename()
+
+                if current_filename != filename:
+                    # Midnight passed, update the filename
+                    filename = current_filename
+                    print(f"{GREEN}New filename: {filename}, restarting threads...{RESET_COLOR}")
+                    time.sleep(1)
+
+                    # Stop current threads
+                    stop_event.set()
+                    io_thread.join()
+                    process_thread.join()
+
+                    # Restart all threads
+                    serial_lock = Lock()
+                    read_queue = Queue()
+                    send_queue = Queue()
+                    stop_event = Event()
+
+                    io_thread = Thread(
+                        target=io_data,
+                        args=(
+                            serial_stream,
+                            ubxreader,
+                            read_queue,
+                            send_queue,
+                            stop_event,
+                        ),
+                    )
+                    process_thread = Thread(
+                        target=process_data,
+                        args=(
+                            read_queue,
+                            stop_event, filename,
+                        ),
+                    )
+
+                    print("\nStarting handler threads. Press Ctrl-C to terminate...")
+                    io_thread.start()
+                    process_thread.start()
+
+
                 # DO STUFF IN THE BACKGROUND...
                 # poll all available NAV messages (receiver will only respond
                 # to those NAV message types it supports; responses won't
@@ -174,7 +219,7 @@ if __name__ == "__main__":
                         count += 1
                         sleep(DELAY)
                 #stop_event.set()
-                print(f"{GREEN}{datetime.utcnow().isoformat()} | {count} NAV message types polled.{RESET_COLOR}")
+                print(f"{GREEN}{datetime.now(timezone.utc).isoformat()} | {count} NAV message types polled.{RESET_COLOR}")
 
             except KeyboardInterrupt:  # capture Ctrl-C
                 print("\n\nTerminated by user.")
@@ -183,4 +228,4 @@ if __name__ == "__main__":
         print(f"\n{RED}Stop signal set. Waiting for threads to complete...{RESET_COLOR}")
         io_thread.join()
         process_thread.join()
-        print(f"\n{GREEN}Processing complete {datetime.utcnow().isoformat()}{RESET_COLOR}")
+        print(f"\n{GREEN}Processing complete {datetime.now(timezone.utc).isoformat()}{RESET_COLOR}")

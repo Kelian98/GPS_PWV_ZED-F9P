@@ -26,23 +26,41 @@ e.g. using RPC server techniques.
 Write each day data in a separate file and update automatically.
 
 """
+
 # pylint: disable=invalid-name
 
+import os
+import time
 from queue import Queue
 from sys import platform
 from threading import Event, Lock, Thread
-from time import sleep
 from serial import Serial
-from pyubx2 import POLL, UBX_PROTOCOL, UBXMessage, UBXReader, UBX_PAYLOADS_POLL
+from pyubx2 import (
+    UBX_PROTOCOL,
+    UBXMessage,
+    UBXReader,
+    VALNONE,
+)
 from datetime import datetime, timedelta, timezone
 from utilities import *
-import time
+
+
+# Constants
+BAUDRATE = 460800  # 115200
+TIMEOUT = 5  # in seconds
+LAYERS = 1
+TRANSACTION = 0
+ENABLE = 1
+PORT_TYPE = "USB"
+SAMPLE_RATE = 1000  # e.g. scale ms (0.001s) 100 = 10Hz, 1000 = 1 Hz
+NAV_RATE = 5  # e.g. 5 means five measurements for every navigation solution. The minimum value is 1. The maximum value is 127.
+DELAY = 1
+
 
 def io_data(
     stream: object,
     ubr: UBXReader,
     readqueue: Queue,
-    sendqueue: Queue,
     stop: Event,
 ):
     """
@@ -58,15 +76,13 @@ def io_data(
         if stream.in_waiting:
             try:
                 (raw_data, parsed_data) = ubr.read()
-                if parsed_data:
-                    readqueue.put((raw_data, parsed_data))
 
-                # refine this if outbound message rates exceed inbound
-                while not sendqueue.empty():
-                    data = sendqueue.get(False)
-                    if data is not None:
-                        ubr.datastream.write(data.serialize())
-                    sendqueue.task_done()
+                if parsed_data and "UNKNOWN PROTOCOL" not in str(parsed_data):
+                    print(parsed_data)
+                    readqueue.put((raw_data, parsed_data))
+                elif "UNKNOWN PROTOCOL" in str(parsed_data):
+                    print(f"{ORANGE}{str(parsed_data)}{RESET_COLOR}")
+                    print(f"{ORANGE} WARNING : CORRUPT DATA, SKIPPING... {RESET_COLOR}")
 
             except Exception as err:
                 print(f"\n\nSomething went wrong {err}\n\n")
@@ -79,64 +95,80 @@ def process_data(queue: Queue, stop: Event, filename: str):
     Get UBX data from queue and display.
     """
 
-    with open(filename, 'ab') as binary_file:
+    with open(filename, "ab") as binary_file:
         while not stop.is_set():
             if queue.empty() is False:
                 (raw_data, parsed) = queue.get()
-                print(parsed)
+                # print(parsed)
                 binary_file.write(raw_data)
                 queue.task_done()
 
 
-def generate_filename():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d") + ".ubx"
+def generate_filename(data_path="/mnt/data/gnss/raw"):
+    os.makedirs(data_path, exist_ok=True)
+    return os.path.join(
+        data_path, datetime.now(timezone.utc).strftime("%Y-%m-%d") + ".ubx"
+    )
+
+
+def check_file_exists(filename):
+    """
+    Check if a file exists.
+    If the file exists, append a suffix with the current time (HH_MM_SS) to the filename.
+    Returns the modified filename.
+    """
+    if os.path.exists(filename):
+        # Get current time
+        current_time = datetime.now().strftime("%H_%M_%S")
+        # Split the filename and extension
+        base, ext = os.path.splitext(filename)
+        # Add the suffix with current time
+        new_filename = f"{base}_{current_time}{ext}"
+        return new_filename
+    else:
+        return filename
 
 
 if __name__ == "__main__":
-    # set port, baudrate and timeout to suit your device configuration
+
+    # set port, BAUDRATE and TIMEOUT to suit your device configuration
     if platform == "win32":  # Windows
-        port = "COM13"
+        PORT = "COM13"
     elif platform == "darwin":  # MacOS
-        port = "/dev/tty.usbmodem101"
+        PORT = "/dev/tty.usbmodem101"
     else:  # Linux
-        port = "/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00"
+        PORT = (
+            "/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00"
+        )
 
-    # Constants
-    baudrate = 115200
-    timeout = 1
-    layers = 1
-    transaction = 0
-    enable = 1
-    port_type = "USB"
-    sample_rate = 1000 #e.g. scale ms (0.001s) 100 = 10Hz, 1000 = 1 Hz
-    nav_rate = 5 #e.g. 5 means five measurements for every navigation solution. The minimum value is 1. The maximum value is 127.
-    DELAY = 1
-
-    # Filename to write the UBX raw data
-    # filename = datetime.utcnow().isoformat() + ".ubx"
+    # First iteration
+    # Get filename to write the UBX raw data
     filename = generate_filename()
+    # Failsafe : if reboot during the day, create new filename with time of reboot
+    filename = check_file_exists(filename)
+    old_datetime = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    with Serial(port, baudrate, timeout=timeout) as serial_stream:
+    with Serial(PORT, BAUDRATE, timeout=TIMEOUT) as serial_stream:
 
-        ubxreader = UBXReader(serial_stream, protfilter=UBX_PROTOCOL)
+        ubxreader = UBXReader(serial_stream, protfilter=UBX_PROTOCOL, validate=VALNONE)
 
+        # Configure to output RAW UBX data
         cfg_data = []
-        cfg_data.append((f"CFG_{port_type}OUTPROT_NMEA", not enable))
-        cfg_data.append((f"CFG_{port_type}OUTPROT_RTCM3X", not enable))
-        cfg_data.append((f"CFG_{port_type}OUTPROT_UBX", enable))
-        cfg_data.append((f"CFG_MSGOUT_UBX_RXM_RAWX_{port_type}", enable))
-        cfg_data.append((f"CFG_MSGOUT_UBX_RXM_SFRBX_{port_type}", enable))
-        cfg_data.append((f"CFG_RATE_MEAS", sample_rate))
-        cfg_data.append((f"CFG_RATE_NAV", nav_rate))
+        cfg_data.append((f"CFG_{PORT_TYPE}OUTPROT_NMEA", not ENABLE))
+        cfg_data.append((f"CFG_{PORT_TYPE}OUTPROT_RTCM3X", not ENABLE))
+        cfg_data.append((f"CFG_{PORT_TYPE}OUTPROT_UBX", ENABLE))
+        cfg_data.append((f"CFG_MSGOUT_UBX_RXM_RAWX_{PORT_TYPE}", ENABLE))
+        cfg_data.append((f"CFG_MSGOUT_UBX_RXM_SFRBX_{PORT_TYPE}", ENABLE))
+        cfg_data.append((f"CFG_RATE_MEAS", SAMPLE_RATE))
+        cfg_data.append((f"CFG_RATE_NAV", NAV_RATE))
 
-        msg = UBXMessage.config_set(layers, transaction, cfg_data)
+        msg = UBXMessage.config_set(LAYERS, TRANSACTION, cfg_data)
         print(msg)
 
         serial_stream.write(msg.serialize())
 
         serial_lock = Lock()
         read_queue = Queue()
-        send_queue = Queue()
         stop_event = Event()
 
         io_thread = Thread(
@@ -145,7 +177,6 @@ if __name__ == "__main__":
                 serial_stream,
                 ubxreader,
                 read_queue,
-                send_queue,
                 stop_event,
             ),
         )
@@ -153,7 +184,8 @@ if __name__ == "__main__":
             target=process_data,
             args=(
                 read_queue,
-                stop_event, filename,
+                stop_event,
+                filename,
             ),
         )
 
@@ -164,12 +196,20 @@ if __name__ == "__main__":
         # loop until user presses Ctrl-C
         while not stop_event.is_set():
             try:
-                current_filename = generate_filename()
+                # Get new date time
+                new_datetime = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-                if current_filename != filename:
-                    # Midnight passed, update the filename
+                # Compare the actual datetime with previous datetime.
+                # If Midnight passed, update the old_datetime variable and filename
+                # Stop writing in the old file, and reinstantiate the threads.
+                if new_datetime != old_datetime:
+                    old_datetime = new_datetime
+                    current_filename = generate_filename()
+
                     filename = current_filename
-                    print(f"{GREEN}New filename: {filename}, restarting threads...{RESET_COLOR}")
+                    print(
+                        f"{GREEN}New filename: {filename}, restarting threads...{RESET_COLOR}"
+                    )
                     time.sleep(1)
 
                     # Stop current threads
@@ -180,7 +220,6 @@ if __name__ == "__main__":
                     # Restart all threads
                     serial_lock = Lock()
                     read_queue = Queue()
-                    send_queue = Queue()
                     stop_event = Event()
 
                     io_thread = Thread(
@@ -189,7 +228,6 @@ if __name__ == "__main__":
                             serial_stream,
                             ubxreader,
                             read_queue,
-                            send_queue,
                             stop_event,
                         ),
                     )
@@ -197,7 +235,8 @@ if __name__ == "__main__":
                         target=process_data,
                         args=(
                             read_queue,
-                            stop_event, filename,
+                            stop_event,
+                            filename,
                         ),
                     )
 
@@ -205,27 +244,15 @@ if __name__ == "__main__":
                     io_thread.start()
                     process_thread.start()
 
-
-                # DO STUFF IN THE BACKGROUND...
-                # poll all available NAV messages (receiver will only respond
-                # to those NAV message types it supports; responses won't
-                # necessarily arrive in sequence)
-                count = 0
-                for nam in UBX_PAYLOADS_POLL:
-                    if nam[0:4] == "NAV-":
-                        print(f"Polling {nam} message type...")
-                        msg = UBXMessage("NAV", nam, POLL)
-                        send_queue.put(msg)
-                        count += 1
-                        sleep(DELAY)
-                #stop_event.set()
-                print(f"{GREEN}{datetime.now(timezone.utc).isoformat()} | {count} NAV message types polled.{RESET_COLOR}")
-
             except KeyboardInterrupt:  # capture Ctrl-C
                 print("\n\nTerminated by user.")
                 stop_event.set()
 
-        print(f"\n{RED}Stop signal set. Waiting for threads to complete...{RESET_COLOR}")
+        print(
+            f"\n{RED}Stop signal set. Waiting for threads to complete...{RESET_COLOR}"
+        )
         io_thread.join()
         process_thread.join()
-        print(f"\n{GREEN}Processing complete {datetime.now(timezone.utc).isoformat()}{RESET_COLOR}")
+        print(
+            f"\n{GREEN}Processing complete {datetime.now(timezone.utc).isoformat()}{RESET_COLOR}"
+        )

@@ -78,11 +78,12 @@ def io_data(
                 (raw_data, parsed_data) = ubr.read()
 
                 if parsed_data and "UNKNOWN PROTOCOL" not in str(parsed_data):
-                    print(parsed_data)
+                    # print(parsed_data)
                     readqueue.put((raw_data, parsed_data))
+
                 elif "UNKNOWN PROTOCOL" in str(parsed_data):
-                    print(f"{ORANGE}{str(parsed_data)}{RESET_COLOR}")
-                    print(f"{ORANGE} WARNING : CORRUPT DATA, SKIPPING... {RESET_COLOR}")
+                    print(f"{datetime.utcnow().isoformat()} : WARNING : CORRUPTED DATA = {str(parsed_data)}, SKIPPING...")
+                    time.sleep(DELAY)
 
             except Exception as err:
                 print(f"\n\nSomething went wrong {err}\n\n")
@@ -148,6 +149,7 @@ if __name__ == "__main__":
     filename = check_file_exists(filename)
     old_datetime = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+
     with Serial(PORT, BAUDRATE, timeout=TIMEOUT) as serial_stream:
 
         ubxreader = UBXReader(serial_stream, protfilter=UBX_PROTOCOL, validate=VALNONE)
@@ -203,6 +205,8 @@ if __name__ == "__main__":
                 # If Midnight passed, update the old_datetime variable and filename
                 # Stop writing in the old file, and reinstantiate the threads.
                 if new_datetime != old_datetime:
+
+                    # Update datetime
                     old_datetime = new_datetime
                     current_filename = generate_filename()
 
@@ -210,7 +214,7 @@ if __name__ == "__main__":
                     print(
                         f"{GREEN}New filename: {filename}, restarting threads...{RESET_COLOR}"
                     )
-                    time.sleep(1)
+                    time.sleep(DELAY)
 
                     # Stop current threads
                     stop_event.set()

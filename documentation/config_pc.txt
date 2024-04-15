@@ -1,0 +1,123 @@
+192.168.200.15
+stardiceatmos@stardiceatmos
+
+
+
+# Install the openssh server
+sudo apt install openssh-server
+sudo apt install emacs
+
+sudo apt install ipython3 git
+
+# To configure git:
+# 1. Create rsa key
+# 2. Add to github account
+# 3. Reload the ssh agent
+
+# generate key pair in the folder /home/stardiceatmos/.ssh
+# name it : id_rsa_git_kelian
+ssh-keygen -t rsa
+
+# Check status of ssh service
+sudo systemctl status sshd.service
+
+# Install git
+sudo apt install git
+
+sudo apt-get install libusb-1.0-0-dev
+
+# Clone the repository
+git clone git@github.com:Kelian98/GPS_PWV_ZED-F9P.git
+
+# Check if GNSS receiver is connected
+stardiceatmos@stardiceatmos:~$ lsusb
+Bus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 001 Device 002: ID 413c:2003 Dell Computer Corp. Keyboard SK-8115
+Bus 001 Device 006: ID 1546:01a9 U-Blox AG u-blox GNSS receiver
+Bus 001 Device 003: ID 03f0:134a HP, Inc Optical Mouse
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+
+stardiceatmos@stardiceatmos:~/Downloads$ ls -lrt /dev/serial/by-id
+total 0
+lrwxrwxrwx 1 root root 13 févr. 22 09:09 usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00 -> ../../ttyACM0
+
+
+# Install required python packages
+sudo apt install python3-pip
+pip install pyubx2 pygnssutils pygpsclient
+pip install tkinter
+sudo apt-get install python3-tk
+sudo apt-get install python3-pil python3-pil.imagetk
+
+# Add to path in .bashrc
+export PATH="$PATH:/home/stardiceatmos/.local/bin"
+
+
+# Install tkinter for GUI
+sudo apt-get install python3-tk
+
+
+# ImportError: cannot import name 'ImageTk' from 'PIL' (/usr/lib/python3/dist-packages/PIL/__init__.py)
+sudo apt-get install python3-pil python3-pil.imagetk
+
+
+# WARNING REQUIRED : Add the user to the group dialout to be able to use serial
+sudo adduser $USER dialout
+
+
+# To check if working and satellite available
+pygpsclient
+# connect the interface using the USB labeled button and let it run...
+
+
+# Mount the disk
+sudo mount /dev/sdb1 /mnt/
+
+# Get rights to use disk
+sudo chown stardiceatmos /mnt/
+
+
+# Follow the guide : https://www.linuxbabe.com/desktop-linux/how-to-automount-file-systems-on-linux
+
+# Create a dir for the mounting point
+stardiceatmos@stardiceatmos:~$ sudo mkdir /mnt/data
+
+# Find information about the disk
+stardiceatmos@stardiceatmos:~$ sudo blkid
+/dev/sdb1: LABEL="HDD" UUID="7d85a09d-e062-4e95-a5e1-58b62fb547ca" BLOCK_SIZE="4096" TYPE="ext4" PARTUUID="f443c663-c9d0-4772-86eb-99d289e38c94"
+
+# Write this line the /etc/fstab file
+UUID=7d85a09d-e062-4e95-a5e1-58b62fb547ca   /mnt/data   ext4   defaults  0   2
+
+# Au vol
+sudo mount -a
+
+
+# Pour exécuter le code au démarrage du PC
+# Créer un symlink dans /bin
+sudo ln -s /home/stardiceatmos/GPS_PWV_ZED-F9P/scripts/acquisition.py gnss_acquisition.py
+
+# Pour le lancer (même si autre utilisateur)
+python3 gnss_acquisition.py
+
+# Ajouter au cron
+crontab -e
+@reboot sleep 30 && python3 /bin/gnss_acquisition.py &>> /home/stardiceatmos/gnss.log &
+
+# Ne pas oublier de créer le fichier gnss.log s'il n'existe pas encore
+
+#Réinitiliaser l'appareil
+sudo usbreset 1546:01a9
+
+# Caméra allsky
+
+USBError: [Errno 13] Access denied (insufficient permissions)
+
+SUBSYSTEMS=="usb", ATTR{idVendor}=="1278", ATTRS{idProduct}=="0509", MODE="0666", GROUP="dialout"
+
+sudo apt-get install libusb-1.0-0-dev
+
+sudo udevadm control --reload
+sudo udevadm trigger
+
+

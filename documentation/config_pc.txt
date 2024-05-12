@@ -1,8 +1,3 @@
-192.168.200.15
-stardiceatmos@stardiceatmos
-
-
-
 # Install the openssh server
 sudo apt install openssh-server
 sudo apt install emacs

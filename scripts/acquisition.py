@@ -43,6 +43,7 @@ from pyubx2 import (
 )
 from datetime import datetime, timedelta, timezone
 from utilities import *
+import logging
 
 
 # Constants
@@ -55,6 +56,11 @@ PORT_TYPE = "USB"
 SAMPLE_RATE = 1000  # e.g. scale ms (0.001s) 100 = 10Hz, 1000 = 1 Hz
 NAV_RATE = 5  # e.g. 5 means five measurements for every navigation solution. The minimum value is 1. The maximum value is 127.
 DELAY = 1
+
+# Configure logging
+
+# logging.Formatter.converter = time.gmtime
+logging.basicConfig(filename='/mnt/data/gnss/logs/logs.log', level=logging.INFO, format='%(asctime)s : %(levelname)s : %(message)s')
 
 
 def io_data(
@@ -77,16 +83,32 @@ def io_data(
             try:
                 (raw_data, parsed_data) = ubr.read()
 
-                if parsed_data and "UNKNOWN PROTOCOL" not in str(parsed_data):
-                    # print(parsed_data)
-                    readqueue.put((raw_data, parsed_data))
+                if len(raw_data) > 1:
+                    if "UNKNOWN PROTOCOL" not in str(parsed_data):
+                        readqueue.put((raw_data, parsed_data))
+                    else:
+                        logging.warning(f"CORRUPTED DATA = {str(parsed_data)}, SKIPPING...")
+                        # print(f"{datetime.utcnow().isoformat()} : WARNING : CORRUPTED DATA = {str(parsed_data)}, SKIPPING...")
+                        # balancer dans un fichier de log avec la bibliothèque logging de python
+                        # basic logger pour créer un fichier de log pour chaque jour d'acq
+                        time.sleep(DELAY)
+                else:
+                    logging.warning(f"EMPTY DATA = {str(parsed_data)}, SKIPPING...")
+                    # print(f"{datetime.utcnow().isoformat()} : WARNING : EMPTY DATA = {str(parsed_data)}, SKIPPING...")
+                    
+                # if parsed_data and "UNKNOWN PROTOCOL" not in str(parsed_data):
+                #    # print(parsed_data)
+                #    readqueue.put((raw_data, parsed_data))
 
-                elif "UNKNOWN PROTOCOL" in str(parsed_data):
-                    print(f"{datetime.utcnow().isoformat()} : WARNING : CORRUPTED DATA = {str(parsed_data)}, SKIPPING...")
-                    time.sleep(DELAY)
+                # elif "UNKNOWN PROTOCOL" in str(parsed_data):
+                #    print(f"{datetime.utcnow().isoformat()} : WARNING : CORRUPTED DATA = {str(parsed_data)}, SKIPPING...")
+                # balancer dans un fichier de log avec la bibliothèque logging de python
+                # basic logger pour créer un fichier de log pour chaque jour d'acq
+                #    time.sleep(DELAY)
 
             except Exception as err:
-                print(f"\n\nSomething went wrong {err}\n\n")
+                logging.warning(f"Catch exception : {err}")
+                # print(f"\n\nSomething went wrong {err}\n\n")
                 continue
 
 
@@ -165,7 +187,7 @@ if __name__ == "__main__":
         cfg_data.append((f"CFG_RATE_NAV", NAV_RATE))
 
         msg = UBXMessage.config_set(LAYERS, TRANSACTION, cfg_data)
-        print(msg)
+        # print(msg)
 
         serial_stream.write(msg.serialize())
 
@@ -191,7 +213,7 @@ if __name__ == "__main__":
             ),
         )
 
-        print("\nStarting handler threads. Press Ctrl-C to terminate...")
+        # print("\nStarting handler threads. Press Ctrl-C to terminate...")
         io_thread.start()
         process_thread.start()
 
@@ -211,9 +233,10 @@ if __name__ == "__main__":
                     current_filename = generate_filename()
 
                     filename = current_filename
-                    print(
-                        f"{GREEN}New filename: {filename}, restarting threads...{RESET_COLOR}"
-                    )
+                    logging.warning(f"New filename: {filename}, restarting threads...")
+                    #print(
+                    #    f"{GREEN}New filename: {filename}, restarting threads...{RESET_COLOR}"
+                    #)
                     time.sleep(DELAY)
 
                     # Stop current threads
@@ -244,19 +267,19 @@ if __name__ == "__main__":
                         ),
                     )
 
-                    print("\nStarting handler threads. Press Ctrl-C to terminate...")
+                    # print("\nStarting handler threads. Press Ctrl-C to terminate...")
                     io_thread.start()
                     process_thread.start()
 
             except KeyboardInterrupt:  # capture Ctrl-C
-                print("\n\nTerminated by user.")
+                # print("\n\nTerminated by user.")
                 stop_event.set()
 
-        print(
-            f"\n{RED}Stop signal set. Waiting for threads to complete...{RESET_COLOR}"
-        )
+#         print(
+#            f"\n{RED}Stop signal set. Waiting for threads to complete...{RESET_COLOR}"
+#        )
         io_thread.join()
         process_thread.join()
-        print(
-            f"\n{GREEN}Processing complete {datetime.now(timezone.utc).isoformat()}{RESET_COLOR}"
-        )
+        # print(
+        #    f"\n{GREEN}Processing complete {datetime.now(timezone.utc).isoformat()}{RESET_COLOR}"
+        #)
